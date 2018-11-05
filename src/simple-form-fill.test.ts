@@ -1,32 +1,53 @@
 import faker = require('faker');
 import puppeteer = require('puppeteer');
 
+import { config } from '../config';
+
+import { singleChoiceVertical, openEndedEssay } from './helpers';
+
+jest.setTimeout(20000);
+
 describe('Loop fill monkey survey', () => {
   let browser: puppeteer.Browser;
   let page: puppeteer.Page;
 
   beforeAll(async () => {
-    browser = await puppeteer.launch({ headless: true });
+    browser = await puppeteer.launch({
+      headless: config.headless,
+    });
     page = await browser.newPage();
   });
 
   beforeEach(async () => {
-    await page.goto('https://www.surveymonkey.com/r/VZ5PCJP');
+    await page.goto(config.surveyUrl);
     await page.waitForSelector('.question-row');
   });
 
   afterEach(async () => {
-    const cookies = await page.cookies();
-    await page.deleteCookie(...cookies.map(cookie => ({ name: cookie.name })));
+    await (page as any)._client.send('Network.clearBrowserCookies');
   });
 
-  it('should have question rows', async () => {
-    let fields = await page.evaluate(() =>
-      document.querySelectorAll('.question-row'),
-    );
-    console.log('====================================');
-    console.log('Fields: ', fields);
-    console.log('====================================');
-    expect(fields.length).toBeGreaterThan(0);
+  afterAll(async () => {
+    await browser.close();
   });
+
+  for (let i = 0; i < config.surveyFillRequests; i++) {
+    it(
+      `should have question rows ${i}`,
+      async () => {
+        let fields = await page.$$('.question-row .question-container');
+
+        expect(Object.keys(fields).length).toBeGreaterThan(0);
+        for (const questionContainer of Object.values(fields)) {
+          await singleChoiceVertical(page, questionContainer);
+          await openEndedEssay(page, questionContainer);
+          await page.waitFor(800);
+        }
+
+        ((await page.$('.survey-page-button')) as puppeteer.ElementHandle<HTMLButtonElement>).click();
+        await page.waitForNavigation();
+      },
+      50000,
+    );
+  }
 });
